@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic Release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.release.outputs.new_release_published }}
+      version: ${{ steps.release.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install semantic-release deps
+        run: |
+          npm install -g \
+            semantic-release \
+            @semantic-release/changelog \
+            @semantic-release/git \
+            conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release
+        id: release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+            conventional-changelog-conventionalcommits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-push:
+    name: Build and Push to ACR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Run integration tests
+        run: go test -tags=integration -timeout=120s ./...
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name uksworkshoptestacr
+
+      - name: Resolve image tags
+        id: tags
+        run: |
+          IMAGE=uksworkshoptestacr.azurecr.io/vehicle-service
+          SHA_TAG="${{ github.sha }}"
+
+          if [ "${{ needs.release.outputs.published }}" == "true" ]; then
+            PRIMARY_TAG="v${{ needs.release.outputs.version }}"
+          else
+            PRIMARY_TAG="$SHA_TAG"
+          fi
+
+          echo "image=$IMAGE"             >> $GITHUB_OUTPUT
+          echo "primary_tag=$PRIMARY_TAG" >> $GITHUB_OUTPUT
+          echo "sha_tag=$SHA_TAG"         >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE="${{ steps.tags.outputs.image }}"
+          PRIMARY="${{ steps.tags.outputs.primary_tag }}"
+          SHA="${{ steps.tags.outputs.sha_tag }}"
+
+          docker build \
+            -t "$IMAGE:$PRIMARY" \
+            -t "$IMAGE:$SHA" \
+            -t "$IMAGE:latest" \
+            .
+
+          docker push "$IMAGE:$PRIMARY"
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"
+
+          echo "PRIMARY_TAG=$PRIMARY" >> $GITHUB_ENV
+
+      - name: Update image tag in flux-operator
+        env:
+          FLUX_REPO_TOKEN: ${{ secrets.FLUX_REPO_TOKEN }}
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          git clone https://x-access-token:${FLUX_REPO_TOKEN}@github.com/jmaguta/flux-operator.git flux-operator
+          cd flux-operator
+
+          sed -i "s|uksworkshoptestacr.azurecr.io/vehicle-service:.*|uksworkshoptestacr.azurecr.io/vehicle-service:${PRIMARY_TAG}|" \
+            apps/engine-room-vehicle/deployment.yaml
+
+          git add apps/engine-room-vehicle/deployment.yaml
+          git commit -m "chore(vehicle-service): update image to ${PRIMARY_TAG} [skip ci]" \
+            || echo "No changes to commit"
+          git push
+
+  test:
+    name: Test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Run unit tests
+        run: go test ./...
+      - name: Run integration tests
+        run: go test -tags=integration -timeout=120s ./...

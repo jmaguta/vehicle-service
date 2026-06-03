@@ -1,0 +1,59 @@
+# vehicle-service — CLAUDE.md
+
+## Build & Run
+- `go build ./cmd/server` — build binary
+- `go test ./...` — unit tests
+- `go test -tags=integration -timeout=120s ./...` — integration tests (requires Docker)
+
+## Module
+`github.com/jmaguta/vehicle-service`
+
+## Architecture
+- chi router + pgx/v5 → Supabase Cloud PostgreSQL (`vehicle` schema)
+- Auth: Bearer JWT (Supabase GoTrue) or `X-Service-Key` header
+- Idempotency: `Client-Mutation-Id` header keyed to `vehicle.idempotency_keys`
+- Health: `/healthz` (liveness), `/health/ready` (DB ping), `/metrics` (Prometheus)
+
+## Environment Variables
+- `DATABASE_URL` — Postgres connection string (AKV: `er-vehicle-database-url`)
+- `SUPABASE_JWT_SECRET` — GoTrue JWT secret (AKV: `er-vehicle-jwt-secret`)
+- `SUPABASE_JWKS_URL` — `https://kgcmfmiksqqasfpzmczh.supabase.co/auth/v1/.well-known/jwks.json`
+- `SERVICE_KEY` — inbound pre-shared key for service-to-service calls (AKV: `er-vehicle-service-key`)
+- `PORT` — defaults to 8080
+
+## Endpoints
+| Method | Path | Auth |
+|--------|------|------|
+| GET | /customers | AuthOrServiceKey |
+| POST | /customers | AdminOrServiceKey |
+| GET | /customers/{id} | AuthOrServiceKey |
+| PATCH | /customers/{id} | AdminOrServiceKey |
+| GET | /vehicles | AuthOrServiceKey |
+| POST | /vehicles | AdminOrServiceKey |
+| GET | /vehicles/{id} | AuthOrServiceKey |
+| PATCH | /vehicles/{id} | AdminOrServiceKey |
+| GET | /healthz | None |
+| GET | /health/ready | None |
+| GET | /metrics | None |
+
+All data routes filter by `workshop_id` from JWT claims (`""` = bypass for service-key callers).
+`GET /vehicles/{id}` and list responses embed `customer_name` via LEFT JOIN.
+
+## Schema
+`vehicle.customers` and `vehicle.vehicles` are the authoritative tables.
+`jobs.customers` and `jobs.vehicles` are views over these (for job-service backward compat during migration).
+
+## Kubernetes
+- Namespace: `engine-room-vehicle`
+- Internal URL: `http://vehicle-service.engine-room-vehicle.svc.cluster.local`
+- AKV secrets: `er-vehicle-database-url`, `er-vehicle-jwt-secret`, `er-vehicle-service-key`
+- BFF outbound key: `er-svc-vehicle-svc-key` → `engine-room-secrets.VEHICLE_SERVICE_KEY`
+
+## Testing Policy
+After every code change: `go test ./...`
+For handler, SQL, middleware, or auth changes: `go test -tags=integration -timeout=120s ./...`
+
+## Recent changes (2026-06-03)
+- Initial service creation (P2 VehicleService extraction from job-service)
+- `vehicle` schema: `customers`, `vehicles`, `idempotency_keys` tables
+- Migration migrates data from `jobs.customers` / `jobs.vehicles` and creates backward-compat views
