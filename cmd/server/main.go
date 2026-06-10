@@ -17,6 +17,7 @@ import (
 	"github.com/jmaguta/vehicle-service/internal/db"
 	"github.com/jmaguta/vehicle-service/internal/handlers"
 	mw "github.com/jmaguta/vehicle-service/internal/middleware"
+	"github.com/jmaguta/vehicle-service/internal/openapi"
 	"github.com/jmaguta/vehicle-service/internal/vehicles"
 )
 
@@ -68,6 +69,13 @@ func main() {
 	r.With(mw.RequireAdminOrServiceKey, idempotency).Post("/vehicles", vh.Create)
 	r.With(mw.RequireAuthOrServiceKey).Get("/vehicles/{id}", vh.Get)
 	r.With(mw.RequireAdminOrServiceKey, idempotency).Patch("/vehicles/{id}", vh.Patch)
+
+	// OpenAPI 3.1 contract — generated from the routes above
+	version := os.Getenv("SERVICE_VERSION")
+	if version == "" {
+		version = "0.0.0"
+	}
+	r.Get("/openapi.json", openapi.Handler(r, "vehicle-service", version))
 
 	port := os.Getenv("PORT")
 	if port == "" {
