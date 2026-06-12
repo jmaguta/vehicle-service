@@ -54,6 +54,6 @@ CREATE TABLE IF NOT EXISTS vehicle.idempotency_keys (
     status_code INT         NOT NULL,
     response    BYTEA       NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours',
+    expires_at  TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '30 days',
     PRIMARY KEY (mutation_id, workshop_id)
 );

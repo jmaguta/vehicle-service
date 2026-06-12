@@ -17,7 +17,7 @@ type idempotencyQuerier interface {
 }
 
 // Idempotency returns a middleware that deduplicates mutation requests keyed on
-// the Client-Mutation-Id header. Responses are stored for 24 hours (TTL set in
+// the Client-Mutation-Id header. Responses are stored for 30 days (TTL set in
 // the DB). A replayed response carries X-Idempotent-Replayed: true.
 // If the header is absent the request passes through unchanged.
 func Idempotency(db idempotencyQuerier) func(http.Handler) http.Handler {
