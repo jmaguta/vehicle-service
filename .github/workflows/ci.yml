@@ -127,7 +127,16 @@ jobs:
           git add apps/engine-room-vehicle/deployment.yaml
           git commit -m "chore(vehicle-service): update image to ${PRIMARY_TAG} [skip ci]" \
             || echo "No changes to commit"
-          git push
+          # Survive concurrent pushes from sibling services' pipelines
+          # racing to update flux-operator main.
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            if git push; then pushed=1; break; fi
+            echo "flux-operator push rejected (attempt $attempt) - rebasing"
+            git pull --rebase --autostash origin main || true
+            sleep $((RANDOM % 5 + 2))
+          done
+          if [ "$pushed" -ne 1 ]; then echo "flux push failed after retries"; exit 1; fi
 
   test:
     name: Test
