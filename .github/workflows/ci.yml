@@ -49,11 +49,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Apply DB migrations to Supabase Cloud before deploying the new image.
+  # Requires the DB_MIGRATION_URL repo secret (postgres connection string).
+  migrate:
+    name: Apply Migrations
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql
+        run: sudo apt-get install -y postgresql-client
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DB_MIGRATION_URL }}
+        run: |
+          for f in $(ls supabase/migrations/*.sql 2>/dev/null | sort); do
+            echo "Applying $f..."
+            psql "$DATABASE_URL" -f "$f"
+          done
+
   build-and-push:
     name: Build and Push to ACR
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: release
+    needs: [release, migrate]
     steps:
       - uses: actions/checkout@v4
 
