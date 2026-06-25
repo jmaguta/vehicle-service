@@ -6,18 +6,26 @@ import (
 	"strconv"
 	"strings"
 
-	mw "github.com/jmaguta/vehicle-service/internal/middleware"
 	"github.com/jmaguta/vehicle-service/internal/auth"
+	mw "github.com/jmaguta/vehicle-service/internal/middleware"
 )
 
+// writeJSON wraps a successful payload in the { "data", "meta" } envelope (§5.3).
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	writeJSONMeta(w, status, v, map[string]any{})
 }
 
+func writeJSONMeta(w http.ResponseWriter, status int, v any, meta map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"data": v, "meta": meta})
+}
+
+// writeError emits a flat { "error": msg } body — errors are not enveloped.
 func writeError(w http.ResponseWriter, msg string, status int) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // workshopIDFromClaims returns the workshop_id from JWT claims in context.
