@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,9 +29,7 @@ func TestListVehicles_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 	var got []vehicles.VehicleWithCustomer
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
+	decodeData(t, rr.Body, &got)
 	if len(got) != 1 || got[0].Registration != reg {
 		t.Errorf("unexpected response: %+v", got)
 	}
@@ -50,9 +49,7 @@ func TestListVehicles_EmptyReturnsArray(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 	var got []vehicles.VehicleWithCustomer
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
+	decodeData(t, rr.Body, &got)
 	if len(got) != 0 {
 		t.Errorf("expected empty array, got %+v", got)
 	}
@@ -165,9 +162,7 @@ func TestUpdateVehicle_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	var got vehicles.VehicleWithCustomer
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	decodeData(t, rr.Body, &got)
 	if got.ID != "v1" {
 		t.Errorf("expected ID v1, got %q", got.ID)
 	}
@@ -533,5 +528,19 @@ func TestUpdateVehicle_EmptyObject(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 on empty object, got %d", rr.Code)
+	}
+}
+
+// decodeData unwraps the { "data", "meta" } response envelope into out.
+func decodeData(t *testing.T, body io.Reader, out any) {
+	t.Helper()
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if err := json.Unmarshal(env.Data, out); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
 	}
 }

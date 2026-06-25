@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	mw "github.com/jmaguta/vehicle-service/internal/middleware"
 	"github.com/jmaguta/vehicle-service/internal/auth"
+	mw "github.com/jmaguta/vehicle-service/internal/middleware"
 	"github.com/jmaguta/vehicle-service/internal/testhelpers"
 	"github.com/jmaguta/vehicle-service/internal/vehicles"
 )
@@ -130,9 +130,7 @@ func TestListCustomers_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 	var got []vehicles.Customer
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
+	decodeData(t, rr.Body, &got)
 	if len(got) != 1 || got[0].Name != "Acme" {
 		t.Errorf("unexpected response: %+v", got)
 	}
@@ -152,9 +150,7 @@ func TestListCustomers_EmptyReturnsArray(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 	var got []vehicles.Customer
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
+	decodeData(t, rr.Body, &got)
 	if len(got) != 0 {
 		t.Errorf("expected empty array, got %+v", got)
 	}
@@ -244,9 +240,7 @@ func TestUpdateCustomer_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	var got vehicles.Customer
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	decodeData(t, rr.Body, &got)
 	if got.ID != "c1" {
 		t.Errorf("expected ID c1, got %q", got.ID)
 	}

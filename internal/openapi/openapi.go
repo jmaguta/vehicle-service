@@ -21,6 +21,26 @@ import (
 // path templating wants the bare name, so strip the ":constraint" portion.
 var paramRe = regexp.MustCompile(`\{([^:}]+)(:[^}]+)?\}`)
 
+// envelopeSchemas describes the standard { data, meta } success envelope (§5.3)
+// and the flat { error } body used for failures. Operations reference these.
+func envelopeSchemas() map[string]any {
+	return map[string]any{
+		"Envelope": map[string]any{
+			"type":     "object",
+			"required": []string{"data", "meta"},
+			"properties": map[string]any{
+				"data": map[string]any{"description": "Response payload (object or array)."},
+				"meta": map[string]any{"type": "object", "description": "Response metadata (e.g. pagination); {} when empty."},
+			},
+		},
+		"Error": map[string]any{
+			"type":       "object",
+			"required":   []string{"error"},
+			"properties": map[string]any{"error": map[string]any{"type": "string"}},
+		},
+	}
+}
+
 // Handler returns an http.HandlerFunc that serves the OpenAPI 3.1 document for r.
 // The walk runs exactly once and the marshalled body is cached.
 func Handler(r chi.Routes, title, version string) http.HandlerFunc {
@@ -35,14 +55,32 @@ func Handler(r chi.Routes, title, version string) http.HandlerFunc {
 				paths[p] = map[string]any{}
 			}
 			paths[p][strings.ToLower(method)] = map[string]any{
-				"responses": map[string]any{"200": map[string]any{"description": "OK"}},
+				"responses": map[string]any{
+					"200": map[string]any{
+						"description": "OK",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"$ref": "#/components/schemas/Envelope"},
+							},
+						},
+					},
+					"default": map[string]any{
+						"description": "Error",
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{"$ref": "#/components/schemas/Error"},
+							},
+						},
+					},
+				},
 			}
 			return nil
 		})
 		body, _ = json.Marshal(map[string]any{
-			"openapi": "3.1.0",
-			"info":    map[string]any{"title": title, "version": version},
-			"paths":   paths,
+			"openapi":    "3.1.0",
+			"info":       map[string]any{"title": title, "version": version},
+			"paths":      paths,
+			"components": map[string]any{"schemas": envelopeSchemas()},
 		})
 	}
 
