@@ -45,6 +45,11 @@ type vehicleRequest struct {
 }
 
 func (h *VehicleHandler) List(w http.ResponseWriter, r *http.Request) {
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
 	active, err := parseOptionalBool(r.URL.Query().Get("active"))
 	if err != nil {
 		writeError(w, "invalid active filter", http.StatusBadRequest)
@@ -53,7 +58,7 @@ func (h *VehicleHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	vvs, err := h.repo.ListVehicles(
 		r.Context(),
-		workshopIDFromClaims(r),
+		workshopID,
 		strings.TrimSpace(r.URL.Query().Get("q")),
 		strings.TrimSpace(r.URL.Query().Get("customer_id")),
 		active,
@@ -71,7 +76,12 @@ func (h *VehicleHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *VehicleHandler) Get(w http.ResponseWriter, r *http.Request) {
-	v, err := h.repo.GetVehicle(r.Context(), workshopIDFromClaims(r), chi.URLParam(r, "id"))
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
+	v, err := h.repo.GetVehicle(r.Context(), workshopID, chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, "not found", http.StatusNotFound)
 		return
@@ -80,6 +90,11 @@ func (h *VehicleHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *VehicleHandler) Create(w http.ResponseWriter, r *http.Request) {
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
 	var body vehicleRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
@@ -108,7 +123,7 @@ func (h *VehicleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v, err := h.repo.CreateVehicle(r.Context(), vehicles.CreateVehicleParams{
-		WorkshopID:              workshopIDFromClaims(r),
+		WorkshopID:              workshopID,
 		CustomerID:              strings.TrimSpace(*body.CustomerID),
 		Registration:            strings.ToUpper(strings.TrimSpace(*body.Registration)),
 		TruckNumber:             strings.TrimSpace(stringValue(body.TruckNumber)),
@@ -139,6 +154,11 @@ func (h *VehicleHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *VehicleHandler) Patch(w http.ResponseWriter, r *http.Request) {
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
 	var body vehicleRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
@@ -220,7 +240,7 @@ func (h *VehicleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		params.VORStatus = body.VORStatus
 	}
 
-	v, err := h.repo.UpdateVehicle(r.Context(), workshopIDFromClaims(r), chi.URLParam(r, "id"), params)
+	v, err := h.repo.UpdateVehicle(r.Context(), workshopID, chi.URLParam(r, "id"), params)
 	if err != nil {
 		h.log.Error("update vehicle", "error", err)
 		writeError(w, "not found", http.StatusNotFound)

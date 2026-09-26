@@ -30,12 +30,15 @@ type mockRepo struct {
 
 	lastUpdateCustomerParams *vehicles.UpdateCustomerParams
 	lastUpdateVehicleParams  *vehicles.UpdateVehicleParams
+	lastWorkshopID           string
 }
 
-func (m *mockRepo) ListCustomers(_ context.Context, _, _ string, _ *bool) ([]vehicles.Customer, error) {
+func (m *mockRepo) ListCustomers(_ context.Context, workshopID, _ string, _ *bool) ([]vehicles.Customer, error) {
+	m.lastWorkshopID = workshopID
 	return m.customers, nil
 }
-func (m *mockRepo) GetCustomer(_ context.Context, _, id string) (vehicles.Customer, error) {
+func (m *mockRepo) GetCustomer(_ context.Context, workshopID, id string) (vehicles.Customer, error) {
+	m.lastWorkshopID = workshopID
 	for _, c := range m.customers {
 		if c.ID == id {
 			return c, nil
@@ -44,6 +47,7 @@ func (m *mockRepo) GetCustomer(_ context.Context, _, id string) (vehicles.Custom
 	return vehicles.Customer{}, errors.New("not found")
 }
 func (m *mockRepo) CreateCustomer(_ context.Context, p vehicles.CreateCustomerParams) (vehicles.Customer, error) {
+	m.lastWorkshopID = p.WorkshopID
 	if m.createErr != nil {
 		return vehicles.Customer{}, m.createErr
 	}
@@ -61,10 +65,12 @@ func (m *mockRepo) UpdateCustomer(_ context.Context, _, id string, p vehicles.Up
 	}
 	return vehicles.Customer{}, errors.New("not found")
 }
-func (m *mockRepo) ListVehicles(_ context.Context, _, _, _ string, _ *bool) ([]vehicles.VehicleWithCustomer, error) {
+func (m *mockRepo) ListVehicles(_ context.Context, workshopID, _, _ string, _ *bool) ([]vehicles.VehicleWithCustomer, error) {
+	m.lastWorkshopID = workshopID
 	return m.vehicleList, nil
 }
-func (m *mockRepo) GetVehicle(_ context.Context, _, id string) (vehicles.VehicleWithCustomer, error) {
+func (m *mockRepo) GetVehicle(_ context.Context, workshopID, id string) (vehicles.VehicleWithCustomer, error) {
+	m.lastWorkshopID = workshopID
 	for _, v := range m.vehicleList {
 		if v.ID == id {
 			return v, nil
@@ -73,6 +79,7 @@ func (m *mockRepo) GetVehicle(_ context.Context, _, id string) (vehicles.Vehicle
 	return vehicles.VehicleWithCustomer{}, errors.New("not found")
 }
 func (m *mockRepo) CreateVehicle(_ context.Context, p vehicles.CreateVehicleParams) (vehicles.VehicleWithCustomer, error) {
+	m.lastWorkshopID = p.WorkshopID
 	if m.createErr != nil {
 		return vehicles.VehicleWithCustomer{}, m.createErr
 	}
@@ -491,6 +498,101 @@ func TestUpdateCustomer_OnlySetFieldsPopulated(t *testing.T) {
 	}
 	if p.OperatorLicenceNumber != nil {
 		t.Errorf("expected OperatorLicenceNumber to be nil, got %v", p.OperatorLicenceNumber)
+	}
+}
+
+// --- workshop-scoping regression tests ---
+// Regression coverage for the cross-workshop leak: vehicle-service used to
+// treat "" as "no filter" whenever a request carried no JWT claims (i.e. was
+// authenticated via the shared service key alone), silently returning/writing
+// across every workshop. It must now hard-reject such requests instead.
+
+func TestListCustomers_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{customers: []vehicles.Customer{{ID: "c1", Name: "Acme"}}}
+	h := NewCustomerHandler(repo, testLog)
+
+	r := httptest.NewRequest(http.MethodGet, "/customers", nil) // no claims, no header
+	rr := httptest.NewRecorder()
+
+	h.List(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if repo.lastWorkshopID != "" {
+		t.Errorf("repo should never have been called, got workshopID %q", repo.lastWorkshopID)
+	}
+}
+
+func TestListCustomers_WorkshopHeaderFallback(t *testing.T) {
+	repo := &mockRepo{customers: []vehicles.Customer{{ID: "c1", Name: "Acme"}}}
+	h := NewCustomerHandler(repo, testLog)
+
+	r := httptest.NewRequest(http.MethodGet, "/customers", nil) // no claims
+	r.Header.Set("X-Workshop-Id", "ws-9")
+	rr := httptest.NewRecorder()
+
+	h.List(rr, r)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if repo.lastWorkshopID != "ws-9" {
+		t.Errorf("expected repo to receive header workshop id, got %q", repo.lastWorkshopID)
+	}
+}
+
+func TestGetCustomer_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{customers: []vehicles.Customer{{ID: "c1", Name: "Acme"}}}
+	h := NewCustomerHandler(repo, testLog)
+
+	r := httptest.NewRequest(http.MethodGet, "/customers/c1", nil)
+	r = chiURLParam(r, "id", "c1")
+	rr := httptest.NewRecorder()
+
+	h.Get(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestCreateCustomer_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{}
+	h := NewCustomerHandler(repo, testLog)
+
+	body := `{"name":"New Corp"}`
+	r := httptest.NewRequest(http.MethodPost, "/customers", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.Create(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if repo.lastWorkshopID != "" {
+		t.Errorf("repo should never have been called, got workshopID %q", repo.lastWorkshopID)
+	}
+}
+
+func TestUpdateCustomer_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{customers: []vehicles.Customer{{ID: "c1", Name: "Old Corp"}}}
+	h := NewCustomerHandler(repo, testLog)
+
+	body := `{"name":"New Corp"}`
+	r := httptest.NewRequest(http.MethodPatch, "/customers/c1", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+	r = chiURLParam(r, "id", "c1")
+	rr := httptest.NewRecorder()
+
+	h.Patch(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if repo.lastUpdateCustomerParams != nil {
+		t.Error("repo should never have been called")
 	}
 }
 

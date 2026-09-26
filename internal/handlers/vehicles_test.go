@@ -531,6 +531,97 @@ func TestUpdateVehicle_EmptyObject(t *testing.T) {
 	}
 }
 
+// --- workshop-scoping regression tests (see customers_test.go for rationale) ---
+
+func TestListVehicles_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{vehicleList: []vehicles.VehicleWithCustomer{{Vehicle: vehicles.Vehicle{ID: "v1"}}}}
+	h := NewVehicleHandler(repo, testLog)
+
+	r := httptest.NewRequest(http.MethodGet, "/vehicles", nil) // no claims, no header
+	rr := httptest.NewRecorder()
+
+	h.List(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if repo.lastWorkshopID != "" {
+		t.Errorf("repo should never have been called, got workshopID %q", repo.lastWorkshopID)
+	}
+}
+
+func TestListVehicles_WorkshopHeaderFallback(t *testing.T) {
+	repo := &mockRepo{vehicleList: []vehicles.VehicleWithCustomer{{Vehicle: vehicles.Vehicle{ID: "v1"}}}}
+	h := NewVehicleHandler(repo, testLog)
+
+	r := httptest.NewRequest(http.MethodGet, "/vehicles", nil) // no claims
+	r.Header.Set("X-Workshop-Id", "ws-9")
+	rr := httptest.NewRecorder()
+
+	h.List(rr, r)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if repo.lastWorkshopID != "ws-9" {
+		t.Errorf("expected repo to receive header workshop id, got %q", repo.lastWorkshopID)
+	}
+}
+
+func TestGetVehicle_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{vehicleList: []vehicles.VehicleWithCustomer{{Vehicle: vehicles.Vehicle{ID: "v1"}}}}
+	h := NewVehicleHandler(repo, testLog)
+
+	r := httptest.NewRequest(http.MethodGet, "/vehicles/v1", nil)
+	r = chiURLParam(r, "id", "v1")
+	rr := httptest.NewRecorder()
+
+	h.Get(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestCreateVehicle_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{}
+	h := NewVehicleHandler(repo, testLog)
+
+	body := `{"customer_id":"c1","registration":"AB12CDE"}`
+	r := httptest.NewRequest(http.MethodPost, "/vehicles", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.Create(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if repo.lastWorkshopID != "" {
+		t.Errorf("repo should never have been called, got workshopID %q", repo.lastWorkshopID)
+	}
+}
+
+func TestUpdateVehicle_NoWorkshopContext_Rejected(t *testing.T) {
+	repo := &mockRepo{vehicleList: []vehicles.VehicleWithCustomer{{Vehicle: vehicles.Vehicle{ID: "v1"}}}}
+	h := NewVehicleHandler(repo, testLog)
+
+	body := `{"registration":"NEW123"}`
+	r := httptest.NewRequest(http.MethodPatch, "/vehicles/v1", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+	r = chiURLParam(r, "id", "v1")
+	rr := httptest.NewRecorder()
+
+	h.Patch(rr, r)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if repo.lastUpdateVehicleParams != nil {
+		t.Error("repo should never have been called")
+	}
+}
+
 // decodeData unwraps the { "data", "meta" } response envelope into out.
 func decodeData(t *testing.T, body io.Reader, out any) {
 	t.Helper()

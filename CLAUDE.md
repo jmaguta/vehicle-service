@@ -1,5 +1,23 @@
 # vehicle-service — CLAUDE.md
 
+## Recent changes (2026-09-26) — close cross-workshop leak for service-key callers
+- Live bug: every data route filtered `workshop_id` as an **opt-in** condition
+  (`WHERE ($1 = '' OR workshop_id = $1::uuid)`), so a request authenticated via
+  `X-Service-Key` alone (no forwarded user JWT) — the BFF's normal mode for
+  these endpoints — silently returned/wrote across **every workshop**. The BFF
+  was already computing and sending the correct workshop id via an
+  `X-Workshop-Id` header on every call (`engine-room-service`'s
+  `internal/vehicle/client.go`) — this service just never read it.
+- Fix: `internal/handlers/helpers.go`'s new `resolveWorkshopID(r)` prefers the
+  JWT claim, falls back to `X-Workshop-Id`, and reports `ok=false` if neither
+  is present. All 8 `CustomerHandler`/`VehicleHandler` methods
+  (List/Get/Create/Patch × 2) now hard-reject with `400 "workshop context
+  required"` instead of falling through to the old opt-in bypass. The repo
+  layer's optional-filter SQL is unchanged — it's simply unreachable-when-empty
+  now that every caller guarantees a non-empty workshop id.
+- Tests: new `*_NoWorkshopContext_Rejected`/`*_WorkshopHeaderFallback` cases in
+  `customers_test.go`/`vehicles_test.go` for every handler.
+
 ## Recent changes (2026-06-25) — P5 {data,meta} response envelope
 - Success responses now wrap in the §5.3 envelope `{ "data": <payload>, "meta": {} }` via `writeJSON`/`writeJSONMeta`; errors stay flat `{ "error": … }` (`writeError` is raw). `/healthz`, `/health/ready`, `/metrics`, `/openapi.json` are exempt. `/openapi.json` references `Envelope`/`Error` component schemas.
 
@@ -42,7 +60,8 @@
 | GET | /health/ready | None |
 | GET | /metrics | None |
 
-All data routes filter by `workshop_id` from JWT claims (`""` = bypass for service-key callers).
+All data routes filter by `workshop_id` from JWT claims, falling back to the `X-Workshop-Id` header
+for service-key callers; a request with neither is hard-rejected with 400 (no bypass).
 `GET /vehicles/{id}` and list responses embed `customer_name` via LEFT JOIN.
 
 ## Schema
