@@ -38,13 +38,18 @@ type customerRequest struct {
 }
 
 func (h *CustomerHandler) List(w http.ResponseWriter, r *http.Request) {
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
 	active, err := parseOptionalBool(r.URL.Query().Get("active"))
 	if err != nil {
 		writeError(w, "invalid active filter", http.StatusBadRequest)
 		return
 	}
 
-	customers, err := h.repo.ListCustomers(r.Context(), workshopIDFromClaims(r), strings.TrimSpace(r.URL.Query().Get("q")), active)
+	customers, err := h.repo.ListCustomers(r.Context(), workshopID, strings.TrimSpace(r.URL.Query().Get("q")), active)
 	if err != nil {
 		h.log.Error("list customers", "error", err)
 		writeError(w, "internal server error", http.StatusInternalServerError)
@@ -58,7 +63,12 @@ func (h *CustomerHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CustomerHandler) Get(w http.ResponseWriter, r *http.Request) {
-	customer, err := h.repo.GetCustomer(r.Context(), workshopIDFromClaims(r), chi.URLParam(r, "id"))
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
+	customer, err := h.repo.GetCustomer(r.Context(), workshopID, chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, "not found", http.StatusNotFound)
 		return
@@ -67,6 +77,11 @@ func (h *CustomerHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CustomerHandler) Create(w http.ResponseWriter, r *http.Request) {
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
 	var body customerRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
@@ -83,7 +98,7 @@ func (h *CustomerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	customer, err := h.repo.CreateCustomer(r.Context(), vehicles.CreateCustomerParams{
-		WorkshopID:            workshopIDFromClaims(r),
+		WorkshopID:            workshopID,
 		Name:                  strings.TrimSpace(*body.Name),
 		Email:                 strings.TrimSpace(stringValue(body.Email)),
 		Phone:                 strings.TrimSpace(stringValue(body.Phone)),
@@ -107,6 +122,11 @@ func (h *CustomerHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CustomerHandler) Patch(w http.ResponseWriter, r *http.Request) {
+	workshopID, ok := resolveWorkshopID(r)
+	if !ok {
+		writeError(w, "workshop context required", http.StatusBadRequest)
+		return
+	}
 	var body customerRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
@@ -162,7 +182,7 @@ func (h *CustomerHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		params.TransportManagerCPC = &v
 	}
 
-	customer, err := h.repo.UpdateCustomer(r.Context(), workshopIDFromClaims(r), chi.URLParam(r, "id"), params)
+	customer, err := h.repo.UpdateCustomer(r.Context(), workshopID, chi.URLParam(r, "id"), params)
 	if err != nil {
 		h.log.Error("update customer", "error", err)
 		writeError(w, "not found", http.StatusNotFound)

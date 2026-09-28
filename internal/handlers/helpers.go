@@ -29,13 +29,28 @@ func writeError(w http.ResponseWriter, msg string, status int) {
 }
 
 // workshopIDFromClaims returns the workshop_id from JWT claims in context.
-// Returns "" for service-key calls (no claims); the repo treats "" as bypass.
+// Returns "" for service-key calls (no claims).
 func workshopIDFromClaims(r *http.Request) string {
 	claims, ok := r.Context().Value(mw.ClaimsKey).(*auth.Claims)
 	if !ok || claims == nil {
 		return ""
 	}
 	return claims.WorkshopID
+}
+
+// resolveWorkshopID returns the workshop id to scope this request to,
+// preferring JWT claims (user-authenticated calls) and falling back to the
+// X-Workshop-Id header the BFF sends for service-key-only calls. ok=false
+// means neither was present and the caller must reject the request rather
+// than treat it as unscoped.
+func resolveWorkshopID(r *http.Request) (id string, ok bool) {
+	if wid := workshopIDFromClaims(r); wid != "" {
+		return wid, true
+	}
+	if h := strings.TrimSpace(r.Header.Get("X-Workshop-Id")); h != "" {
+		return h, true
+	}
+	return "", false
 }
 
 func stringValue(v *string) string {
